@@ -1,0 +1,22 @@
+universe = vanilla
+executable = exe_condor.sh # This submission script will execute exe_condor.sh script. Change to your own executable script.
+
+arguments = $(Run_number) # Use run number as 1st argument to be passed to exe_condor.sh
+
+# Fix here to locate logs in appropriate directory
+output = ./drawWave_log/out/o_$(Run_number).out # output log file location
+error  = ./drawWave_log/err/e_$(Run_number).err # error  log file location
+log    = ./drawWave_log/log/l_$(Run_number).log # condor log file location
+
+request_memory = 1 GB # 1 GB will be enough for most of jobs
+
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+# Fix here to properly locate & transfer your executable to be executed by exe_condor.sh, lib64 folder and exe_condor.sh script
+transfer_input_files = /u/user/swkim/pre-exercise/dual-readout_TB/analysis/TBdrawWave.exe, \
+                       /u/user/swkim/pre-exercise/dual-readout_TB/install/lib64, \
+                       /u/user/swkim/pre-exercise/dual-readout_TB/exe_condor.sh
+
+JobBatchName = draw_wave_m1 # Job name
+queue Run_number from run_list_m1.txt # Read run_list_m1.txt line by line, and use them as $(Run_number)
+# Note that run_list_m1.txt should be in the same directory as your condor submission script

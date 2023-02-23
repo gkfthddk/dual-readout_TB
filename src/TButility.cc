@@ -29,30 +29,44 @@ TBdetector::detid TButility::detid(int tid) const {
     return TBdetector::detid::tail;
   if ( static_cast<int>(TBdetector::detid::muon) == tid )
     return TBdetector::detid::muon;
+  if ( static_cast<int>(TBdetector::detid::SiPM) == tid )
+    return TBdetector::detid::SiPM;
+  if ( static_cast<int>(TBdetector::detid::PMT) == tid )
+    return TBdetector::detid::PMT;
+  if ( static_cast<int>(TBdetector::detid::Module3D_C) == tid )
+    return TBdetector::detid::Module3D_C;
+  if ( static_cast<int>(TBdetector::detid::Module3D_S) == tid )
+    return TBdetector::detid::Module3D_S;
 
   return TBdetector::detid::nulldet;
 }
 
 void TButility::loading(const std::string& path) {
-  std::ifstream in;
   int mid, ch;
   int module, tower;
   int isCeren, isSiPM;
-  int plate, column;
+  int plate, column; 
 
-  in.open(path);
+  std::cout << "Loading mapping file : " << path << std::endl;
 
-  while (true) {
-    in >> mid >> ch >> module >> tower >> isCeren >>
-    isSiPM >> plate >> column;
+  TChain* mapChain = new TChain("mapping");
+  mapChain->Add((TString)path);
 
-    if (!in.good())
-      break;
+  mapChain->SetBranchAddress("mid",&mid);
+  mapChain->SetBranchAddress("ch",&ch);
+  mapChain->SetBranchAddress("module",&module);
+  mapChain->SetBranchAddress("tower",&tower);
+  mapChain->SetBranchAddress("isCeren",&isCeren);
+  mapChain->SetBranchAddress("isSiPM",&isSiPM);
+  mapChain->SetBranchAddress("plate",&plate);
+  mapChain->SetBranchAddress("column",&column);
+
+
+  for ( int i = 0; i < mapChain->GetEntries(); i++ ) {
+    mapChain->GetEntry(i);
 
     auto cid = TBcid(mid,ch);
 
-    // check auxiliary
-    // hard-coded!!!
     if ( module==3 ) {
       TBdetector::detid adetid = this->detid(tower);
       auto det = TBdetector(adetid);
@@ -76,15 +90,13 @@ void TButility::loading(const std::string& path) {
       continue;
     }
 
-    // PMT
-    // TODO MCPPMT
     auto det = TBdetector(TBdetector::detid::PMT);
     det.encodeModule(module,tower,static_cast<bool>(isCeren));
 
     mapping_.insert(std::make_pair(cid,det));
   }
 
-  in.close();
+  delete mapChain;
 }
 
 TBdetector TButility::find(const TBcid& cid) const {
@@ -95,23 +107,23 @@ TBdetector TButility::find(const TBcid& cid) const {
 }
 
 void TButility::loadped(const std::string& path) {
-  std::ifstream in;
-  in.open(path, std::ios::in);
 
-  int mid, ch;
+  TH2F* pedMap = (TH2F*)(TFile::Open((TString)path)->Get("pedestal"));
+
   float ped;
 
-  while (true) {
-    in >> mid >> ch >> ped;
+  for ( int mid = 1; mid <= 15; mid++ ) {
+    for ( int ch = 1; ch <= 32; ch++ ) {
 
-    if (!in.good())
-      break;
+      ped = pedMap->GetBinContent(mid, ch);
 
-    auto cid = TBcid(mid,ch);
-    pedmap_.insert(std::make_pair(cid,ped));
+      auto cid = TBcid(mid,ch);
+      pedmap_.insert(std::make_pair(cid,ped));
+
+    }
   }
 
-  in.close();
+  delete pedMap;
 };
 
 float TButility::retrievePed(const TBcid& cid) const {
@@ -140,4 +152,64 @@ int TButility::pid(float psadc, float muadc=0.) const {
     pid = 11; // electron
 
   return pid;
+}
+
+TBcid TButility::getcid(TBdetector::detid did) const {
+
+  for ( auto detInfo : mapping_ ) 
+    if ( detInfo.second.det() == did )
+      return detInfo.first;
+
+  return TBcid(0, 0);
+}
+
+TBcid TButility::getcid(TBdetector::detid did, int module, int tower, bool isCeren) const {
+
+  for ( auto detInfo : mapping_ ) 
+    if ( detInfo.second.det() == did 
+      && detInfo.second.module() == module
+      && detInfo.second.tower() == tower
+      && detInfo.second.isCeren() == isCeren )
+      return detInfo.first;
+
+  return TBcid(0, 0);
+}
+
+TBcid TButility::getcid(int module, int tower, bool isCeren) const {
+
+  for ( auto detInfo : mapping_ ) 
+    if ( detInfo.second.module() == module
+      && detInfo.second.tower() == tower
+      && detInfo.second.isCeren() == isCeren )
+      return detInfo.first;
+  
+  return TBcid(0, 0);
+}
+
+TBcid TButility::getcid(int did, int module, int tower, bool isCeren) const {
+
+    TBdetector::detid detid = TButility::detid(did);
+
+    for ( auto detInfo : mapping_ ) 
+    if ( detInfo.second.det() == detid 
+      && detInfo.second.module() == module
+      && detInfo.second.tower() == tower
+      && detInfo.second.isCeren() == isCeren )
+      return detInfo.first;
+
+  return TBcid(0, 0);
+}
+
+TBcid TButility::getcid(TBdetector::detid did, int module, int tower, int column, int plate, bool isCeren) const {
+
+  for ( auto detInfo : mapping_ ) 
+    if ( detInfo.second.det() == did 
+      && detInfo.second.module() == module
+      && detInfo.second.tower() == tower
+      && detInfo.second.column() == column
+      && detInfo.second.plate() == plate
+      && detInfo.second.isCeren() == isCeren )
+      return detInfo.first;
+
+  return TBcid(0, 0);
 }

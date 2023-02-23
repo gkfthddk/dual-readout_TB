@@ -30,3 +30,19 @@
 *.exe
 *.out
 *.app
+
+# Root files
+*.root
+*.dat
+
+# plots
+*.png
+*.pdf
+*.log
+
+# except for doc folder for README.md
+!doc/*.png
+
+# install & build forders
+install/
+build/

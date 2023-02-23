@@ -3,9 +3,30 @@
 #include "TBevt.h"
 
 #include <stdexcept>
+#include <boost/python.hpp>
 
 #include "TFile.h"
 #include "TTree.h"
+
+void TBread::printProgress(const int currentStep, const int totalStep) {
+  // print progress
+  float progress = (float) currentStep / totalStep;
+  int barWidth = 70;
+  std::cout << "[";
+  int pos = barWidth * progress;
+  for (int i = 0; i < barWidth; i++) {
+    if ( i < pos ) std::cout << "=";
+    else if (i == pos) std::cout << ">";
+    else std::cout << " ";
+  }
+  std::cout << "]  " << currentStep << "/" << totalStep << "  " << int(progress * 100.0) << "%\r";
+  std::cout.flush();
+}
+
+FILE* TBread::py_readFile(char* filename) {
+  FILE* fp = fopen(filename, "rb");
+  return fp;
+}
 
 TBmidbase TBread::readMetadata(FILE* fp) {
   char data[64];
@@ -207,114 +228,293 @@ TBmid<TBfastmode> TBread::readFastmode(FILE* fp) {
   return std::move(amid);
 }
 
-void TBread::ntuplizeWaveform(const boost::python::list& alist, const std::string& output) {
-  std::vector<std::string> filenames;
+void TBread::ntuplizeWaveform(const boost::python::list& alist, const std::string& output, const int maxEntry, const int entryPerSplit) {
+  // get max file number (fileNum 0 ~ fileNum N) >> numOfFiles == N+1
+  const int numOfFiles = boost::python::len(alist);
 
-  for (unsigned idx = 0; idx < boost::python::len(alist); idx++)
-    filenames.push_back(boost::python::extract<std::string>(alist[idx]));
-
-  // get # of events in file
-  FILE* fp = fopen(filenames.front().c_str(), "rb");
-  fseek(fp, 0L, SEEK_END);
-  unsigned long long file_size = ftell(fp);
-  fclose(fp);
-  int nevt = file_size / 65536;
-
-  std::vector<FILE*> files;
-  files.reserve(filenames.size());
-
-  for (unsigned int idx = 0; idx < filenames.size(); idx++)
-    files.emplace_back( fopen(filenames.at(idx).c_str(), "rb") );
-
-  auto anevt = TBevt<TBwaveform>();
-  TFile* rootfile = TFile::Open(output.c_str(),"RECREATE");
-  auto roottree = new TTree("events","waveform events");
-  roottree->Branch("TBevt",&anevt);
-
-  for (unsigned ievt = 0; ievt < nevt; ievt++) {
-    // fill TBevt
-    std::vector<TBmid<TBwaveform>> mids;
-    mids.reserve(files.size());
-
-    // reference mid
-    TBmid<TBwaveform> midref = readWaveform(files.at(0));
-    int refevt = midref.evt();
-    mids.emplace_back(midref);
-    anevt.setTCB(refevt);
-
-    for (unsigned int idx = 1; idx < files.size(); idx++) {
-      TBmid<TBwaveform> amid = readWaveform(files.at(idx));
-
-      if (amid.evt()!=refevt) // TODO tcb_trig_number difference handling
-        throw std::runtime_error("TCB trig numbers are different!");
-
-      mids.emplace_back(amid);
+  // Vector storing all files (initialized with size of all file numbers * all MIDs)
+  // { {file0_MID1, file0_MID2, ... file0_MID15},
+  //   {file1_MID1, file1_MID2,... file1_MID15},
+  //   ...
+  //   {fileN_MID1, fileN_MID2,... fileN_MID15} }
+  // totalFiles[file number][MID] >> return single file name
+  std::vector< std::vector<std::string> > totalFiles(numOfFiles, std::vector<std::string>(boost::python::len(alist[0])));
+  for (unsigned fileNum = 0; fileNum < numOfFiles; fileNum++) {
+    for (unsigned MID = 0; MID < boost::python::len(alist[fileNum]); MID++) {
+      totalFiles[fileNum][MID] = boost::python::extract<std::string>(alist[fileNum][MID]);
     }
-
-    anevt.set(mids);
-
-    roottree->Fill();
   }
 
-  for (unsigned int idx = 0; idx < files.size(); idx++)
-    fclose(files.at(idx));
+  // get total # of MIDs
+  const int numOfMID = totalFiles.front().size();
 
-  rootfile->WriteTObject(roottree);
-  rootfile->Close();
+  // entryPerMID >> to get total number of events by each MIDs, store  minimum value among them.
+  // This ensures that the event loop does not exceeds MID containing minimum # of evts
+  // entryPerFile >> to get entries of single file, will use for jumping to next file in event loop.
+  std::vector<int> entryPerMID(numOfMID);
+  std::vector< std::vector<int> > entryPerFile( numOfFiles, std::vector<int>(numOfMID) );
+  for (unsigned fileNum = 0; fileNum < numOfFiles; fileNum++) {
+    for (unsigned MID = 0; MID < numOfMID; MID++) {
+      FILE* fp = fopen(totalFiles[fileNum][MID].c_str(), "rb");
+      fseek(fp, 0L, SEEK_END);
+      unsigned long long file_size = ftell(fp);
+      fclose(fp);
+      entryPerMID[MID] += (int)(file_size / 65536);
+      entryPerFile[fileNum][MID] = (int)(file_size / 65536);
+    }
+  }
+
+  // get total # of entries to be actually filled in ntuples
+  int totalEntry = *std::min_element(entryPerMID.begin(), entryPerMID.end());
+  if ( (totalEntry > maxEntry) && (maxEntry != -1) ) totalEntry = maxEntry;
+  std::cout << "Total entry = " << totalEntry << std::endl;
+  if (entryPerSplit != -1 ) {
+    std::cout << "Total " << ( (totalEntry / entryPerSplit) + 1) << " ntuple files will be created" << std::endl;
+  }
+  else {
+    std::cout << "Total 1 ntuple file will be created" << std::endl;
+  }
+
+  // setting ntuple ROOT file
+  auto anEvtData = TBevt<TBwaveform>();
+  auto rootTree = new TTree("events","waveform events");
+  rootTree->Branch("TBevt",&anEvtData);
+  rootTree->SetAutoSave(0);
+
+  // vector containing currently opened file number for each MID
+  // vector containing event passed for currently opened file for each MID
+  std::vector<int> currentOpenFileNum(numOfMID);
+  std::vector<int> entryCounted(numOfMID);
+  std::vector<FILE*> files(numOfMID);
+  for (unsigned MID = 0; MID < numOfMID; MID++) {
+    files[MID] = fopen(totalFiles[0][MID].c_str(), "rb");
+  }
+  int rootFilePostFix = 0;
+  // Loop over total events to fill ntuple ROOT file
+  for (unsigned iEvt = 0; iEvt < totalEntry; iEvt++) {
+    // if count[MID] exceeds # of entry of corresponding file, move to next file
+    for (unsigned MID = 0; MID < numOfMID; MID++) {
+      // currently opened file number for each MID
+      if ( entryPerFile[currentOpenFileNum[MID]][MID] == entryCounted[MID] ) {
+        fclose(files[MID]);
+        currentOpenFileNum[MID]++;
+        files[MID] = fopen(totalFiles[currentOpenFileNum[MID]][MID].c_str(), "rb");
+        entryCounted[MID] = 0;
+      }
+    }
+
+    // fill TBevt
+    // vector containing waveform MID info
+    std::vector<TBmid<TBwaveform>> MIDs;
+    MIDs.reserve(numOfMID);
+
+    // Use MID 1 as reference MID
+    TBmid<TBwaveform> RefMID = readWaveform(files[0]);
+    MIDs.emplace_back(RefMID);
+    anEvtData.setTCB(RefMID.evt());
+    // Loop over MID 2 ~ 15 & fill MIDs vector
+    for (unsigned MID = 1; MID < numOfMID; MID++) {
+      TBmid<TBwaveform> aMID = readWaveform(files[MID]);
+      // throw error if evt from MID 2 ~ 15 differs from MID 1 evt
+      if (aMID.tcb_trig_number() != RefMID.tcb_trig_number()) {
+        std::cout << "[Error] Current event number : " << iEvt << std::endl;
+        std::cout << "[Error] TCB trig num of MID " << MID << " FileNum " << currentOpenFileNum[MID] << " is " << aMID.tcb_trig_number() << std::endl;
+        std::cout << "[Error] TCB trig num of MID 1 FileNum " << currentOpenFileNum[0] << " is " << RefMID.tcb_trig_number() << std::endl;
+        throw std::runtime_error("TCB trig numbers are different!");
+        }
+      MIDs.emplace_back(aMID);
+    }
+    anEvtData.set(MIDs);
+    rootTree->Fill();
+
+    // end of evt loop >> increase # of entry counted per file
+    for (unsigned MID = 0; MID < numOfMID; MID++) entryCounted[MID]++;
+
+    // print progress
+    printProgress( (iEvt + 1) , totalEntry);
+
+    // write Ntuple root file with int(entryPerSplit) events in it
+    // if total entry > entryPerSplit, then only one output root file is needed, so skip this step
+    if( ((iEvt + 1) % entryPerSplit == 0) && (entryPerSplit != -1) ) {
+      auto fName = (output + "_" + std::to_string(rootFilePostFix) + ".root");
+      std::cout << std::endl;
+      std::cout << "Splitting output root file with name : " << fName << std::endl;
+      rootFilePostFix++;
+
+      TFile* outputRootFile = TFile::Open(fName.c_str(), "RECREATE");
+      outputRootFile->cd();
+      rootTree->Write();
+      outputRootFile->Close();
+      delete outputRootFile;
+
+      rootTree->Reset();
+      rootTree->SetAutoSave(0);
+    }
+  }
+  
+  for (unsigned MID = 0; MID < numOfMID; MID++) {
+    fclose(files[MID]);
+  }
+
+
+  // wite Ntuple if there exists some leftover events
+  if (rootTree->GetEntries() != 0) {
+    auto fName = (output + "_" + std::to_string(rootFilePostFix) + ".root");
+    std::cout << std::endl;
+    std::cout << "Splitting output root file with name : " << fName << std::endl;
+    TFile* outputRootFile = TFile::Open(fName.c_str(), "RECREATE");
+    outputRootFile->cd();
+    rootTree->Write();
+    outputRootFile->Close();
+    delete outputRootFile;
+    delete rootTree;
+  }
 }
 
-void TBread::ntuplizeFastmode(const boost::python::list& alist, const std::string& output) {
-  std::vector<std::string> filenames;
+void TBread::ntuplizeFastmode(const boost::python::list& alist, const std::string& output, const int maxEntry, const int entryPerSplit) {
+  // get max file number (fileNum 0 ~ fileNum N) >> numOfFiles == N+1
+  const int numOfFiles = boost::python::len(alist);
 
-  for (unsigned idx = 0; idx < boost::python::len(alist); idx++)
-    filenames.push_back(boost::python::extract<std::string>(alist[idx]));
-
-  // get # of events in file
-  FILE* fp = fopen(filenames.front().c_str(), "rb");
-  fseek(fp, 0L, SEEK_END);
-  int file_size = ftell(fp);
-  fclose(fp);
-  int nevt = file_size / 256;
-
-  std::vector<FILE*> files;
-  files.reserve(filenames.size());
-
-  for (unsigned int idx = 0; idx < filenames.size(); idx++)
-    files.emplace_back( fopen(filenames.at(idx).c_str(), "rb") );
-
-  auto anevt = TBevt<TBfastmode>();
-  TFile* rootfile = TFile::Open(output.c_str(),"RECREATE");
-  auto roottree = new TTree("events","fastmode events");
-  roottree->Branch("TBevt",&anevt);
-
-  for (unsigned ievt = 0; ievt < nevt; ievt++) {
-    // fill TBevt
-    std::vector<TBmid<TBfastmode>> mids;
-    mids.reserve(files.size());
-
-    // reference mid
-    TBmid<TBfastmode> midref = readFastmode(files.at(0));
-    int refevt = midref.evt();
-    mids.emplace_back(midref);
-    anevt.setTCB(refevt);
-
-    for (unsigned int idx = 1; idx < files.size(); idx++) {
-      TBmid<TBfastmode> amid = readFastmode(files.at(idx));
-
-      if (amid.evt()!=refevt) // TODO tcb_trig_number difference handling
-        throw std::runtime_error("TCB trig numbers are different!");
-
-      mids.emplace_back(amid);
+  // Vector storing all files (initialized with size of all file numbers * all MIDs)
+  // { {file0_MID1, file0_MID2, ... file0_MID15},
+  //   {file1_MID1, file1_MID2,... file1_MID15},
+  //   ...
+  //   {fileN_MID1, fileN_MID2,... fileN_MID15} }
+  // totalFiles[file number][MID] >> return single file name
+  std::vector< std::vector<std::string> > totalFiles(numOfFiles, std::vector<std::string>(boost::python::len(alist[0])));
+  for (unsigned fileNum = 0; fileNum < numOfFiles; fileNum++) {
+    for (unsigned MID = 0; MID < boost::python::len(alist[fileNum]); MID++) {
+      totalFiles[fileNum][MID] = boost::python::extract<std::string>(alist[fileNum][MID]);
     }
-
-    anevt.set(mids);
-
-    roottree->Fill();
   }
 
-  for (unsigned int idx = 0; idx < files.size(); idx++)
-    fclose(files.at(idx));
+  // get total # of MIDs
+  const int numOfMID = totalFiles.front().size();
 
-  rootfile->WriteTObject(roottree);
-  rootfile->Close();
+  // entryPerMID >> to get total number of events by each MIDs, store  minimum value among them.
+  // This ensures that the event loop does not exceeds MID containing minimum # of evts
+  // entryPerFile >> to get entries of single file, will use for jumping to next file in event loop.
+  std::vector<int> entryPerMID(numOfMID);
+  std::vector< std::vector<int> > entryPerFile( numOfFiles, std::vector<int>(numOfMID) );
+  for (unsigned fileNum = 0; fileNum < numOfFiles; fileNum++) {
+    for (unsigned MID = 0; MID < numOfMID; MID++) {
+      FILE* fp = fopen(totalFiles[fileNum][MID].c_str(), "rb");
+      fseek(fp, 0L, SEEK_END);
+      unsigned long long file_size = ftell(fp);
+      fclose(fp);
+      entryPerMID[MID] += (int)(file_size / 256);
+      entryPerFile[fileNum][MID] = (int)(file_size / 256);
+    }
+  }
+
+  // get total # of entries to be actually filled in ntuples
+  int totalEntry = *std::min_element(entryPerMID.begin(), entryPerMID.end());
+  if ( (totalEntry > maxEntry) && (maxEntry != -1) ) totalEntry = maxEntry;
+  std::cout << "Total entry = " << totalEntry << std::endl;
+  if (entryPerSplit != -1 ) {
+    std::cout << "Total " << ( (totalEntry / entryPerSplit) + 1) << " ntuple files will be created" << std::endl;
+  }
+  else {
+    std::cout << "Total 1 ntuple file will be created" << std::endl;
+  }
+
+  // setting ntuple ROOT file
+  auto anEvtData = TBevt<TBfastmode>();
+  auto rootTree = new TTree("events","fastmode events");
+  rootTree->Branch("TBevt",&anEvtData);
+  rootTree->SetAutoSave(0);
+
+  // vector containing currently opened file number for each MID
+  // vector containing event passed for currently opened file for each MID
+  std::vector<int> currentOpenFileNum(numOfMID);
+  std::vector<int> entryCounted(numOfMID);
+  std::vector<FILE*> files(numOfMID);
+  for (unsigned MID = 0; MID < numOfMID; MID++) {
+    files[MID] = fopen(totalFiles[0][MID].c_str(), "rb");
+  }
+  int rootFilePostFix = 0;
+  // Loop over total events to fill ntuple ROOT file
+  for (unsigned iEvt = 0; iEvt < totalEntry; iEvt++) {
+    // if count[MID] exceeds # of entry of corresponding file, move to next file
+    for (unsigned MID = 0; MID < numOfMID; MID++) {
+      // currently opened file number for each MID
+      if ( entryPerFile[currentOpenFileNum[MID]][MID] == entryCounted[MID] ) {
+        fclose(files[MID]);
+        currentOpenFileNum[MID]++;
+        files[MID] = fopen(totalFiles[currentOpenFileNum[MID]][MID].c_str(), "rb");
+        entryCounted[MID] = 0;
+      }
+    }
+
+    // fill TBevt
+    // vector containing fastmode MID info
+    std::vector<TBmid<TBfastmode>> MIDs;
+    MIDs.reserve(numOfMID);
+
+    // Use MID 1 as reference MID
+    TBmid<TBfastmode> RefMID = readFastmode(files[0]);
+    MIDs.emplace_back(RefMID);
+    anEvtData.setTCB(RefMID.evt()); // TODO : Check this!
+    // anEvtData.setTCB(RefMID.tcb_trig_number()); // TODO : Check this!!
+
+    // Loop over MID 2 ~ 15 & fill MIDs vector
+    for (unsigned MID = 1; MID < numOfMID; MID++) {
+      TBmid<TBfastmode> aMID = readFastmode(files[MID]);
+      // throw error if evt from MID 2 ~ 15 differs from MID 1 evt
+      if (aMID.tcb_trig_number() != RefMID.tcb_trig_number()) {
+        std::cout << "[Error] Current event number : " << iEvt << std::endl;
+        std::cout << "[Error] TCB trig num of MID " << MID << " FileNum " << currentOpenFileNum[MID] << " is " << aMID.tcb_trig_number() << std::endl;
+        std::cout << "[Error] TCB trig num of MID 1 FileNum " << currentOpenFileNum[0] << " is " << RefMID.tcb_trig_number() << std::endl;
+        throw std::runtime_error("TCB trig numbers are different!");
+        }
+      MIDs.emplace_back(aMID);
+    }
+    anEvtData.set(MIDs);
+    rootTree->Fill();
+
+    // end of evt loop >> increase # of entry counted per file
+    for (unsigned MID = 0; MID < numOfMID; MID++) entryCounted[MID]++;
+
+    // print progress
+    printProgress( (iEvt + 1) , totalEntry);
+
+    // write Ntuple root file with int(entryPerSplit) events in it
+    // if total entry > entryPerSplit, then only one output root file is needed, so skip this step
+    if( ((iEvt + 1) % entryPerSplit == 0) && (entryPerSplit != -1) ) {
+      auto fName = (output + "_" + std::to_string(rootFilePostFix) + ".root");
+      std::cout << std::endl;
+      std::cout << "Splitting output root file with name : " << fName << std::endl;
+      rootFilePostFix++;
+
+      TFile* outputRootFile = TFile::Open(fName.c_str(), "RECREATE");
+      outputRootFile->cd();
+      rootTree->Write();
+      outputRootFile->Close();
+      // delete outputRootFile;
+
+      rootTree->Reset();
+      // delete rootTree;
+      // auto rootTree = new TTree("events","fastmode events");
+      // auto anEvtData = TBevt<TBfastmode>();
+      // rootTree->Branch("TBevt",&anEvtData);
+      rootTree->SetAutoSave(0);
+    }
+  }
+
+  // wite Ntuple if there exists some leftover events
+  if (rootTree->GetEntries() != 0) {
+    auto fName = (output + "_" + std::to_string(rootFilePostFix) + ".root");
+    std::cout << std::endl;
+    std::cout << "Splitting output root file with name : " << fName << std::endl;
+    TFile* outputRootFile = TFile::Open(fName.c_str(), "RECREATE");
+    outputRootFile->cd();
+    rootTree->Write();
+    outputRootFile->Close();
+    delete rootTree;
+    delete outputRootFile;
+  }
+
+  for (unsigned MID = 0; MID < numOfMID; MID++) {
+    fclose(files[MID]);
+  }
 }

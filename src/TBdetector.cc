@@ -25,8 +25,7 @@ TBdetector::TBdetector(TBdetector::detid in)
 bool TBdetector::isModule() const {
   return (
     det_==detid::SiPM ||
-    det_==detid::PMT  ||
-    det_==detid::MCPPMT
+    det_==detid::PMT
   );
 }
 

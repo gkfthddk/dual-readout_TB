@@ -27,7 +27,8 @@ public:
     nulldet = -1,
     SiPM = 0,
     PMT,
-    MCPPMT, // not used
+    MCPPMT_nC = 8, // not used
+    MCPPMT_nS = 9, // not used
     DWC1analogue = 10,
     DWC1digital = 12,
     DWC2analogue = 16,
@@ -35,9 +36,11 @@ public:
     extTrig1 = 22,
     extTrig2,
     veto,
-    preshower,
+    preshower, // 25
     tail,
-    muon
+    muon, // 27
+    Module3D_C = 28,
+    Module3D_S = 29  
   };
 public:
   TBdetector();
