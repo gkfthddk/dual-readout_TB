@@ -67,9 +67,11 @@ int main(int argc, char** argv) {
     */
     
     // Exercise 1 : Define cid of both Module 1 Tower 1 Cerenkov channel and Scintillation channel (generic PMT)
-    TBcid M1T1C_cid = utility.getcid( , , ); // Your answer here
-    TBcid M1T1S_cid = utility.getcid( , , ); // Your answer here
+    TBcid M1T1C_cid = utility.getcid(TBdetector::detid::PMT,1,1,true); // Your answer here
+    TBcid M1T1S_cid = utility.getcid(TBdetector::detid::PMT,1,1,false); // Your answer here
     TBcid pscid = utility.getcid(TBdetector::detid::preshower);
+    TBcid muon_cid = TBcid(1,16);
+
 
     // Starting Evt Loop
     for (int iEvt = 0; iEvt < totalEntry; iEvt++) {
@@ -84,6 +86,7 @@ int main(int argc, char** argv) {
         M1T1CWaveformHist->GetYaxis()->SetRangeUser(-100, 4096);
         TH1F* M1T1SWaveformHist = new TH1F( ( "M1T1SWaveform_" + std::to_string(iEvt) ).c_str(), ("M1T1SWaveform_" + std::to_string(iEvt) + ";bin;ADC").c_str() , 1000, 0, 1000);
         M1T1SWaveformHist->GetYaxis()->SetRangeUser(-100, 4096);
+        TH1F* muonWaveformHist = new TH1F( ( "muonWaveform_" + std::to_string(iEvt) ).c_str(), ("muonWaveform_" + std::to_string(iEvt) + ";bin;ADC").c_str() , 1000, 0, 1000);
 
         // To get data (TBwaveform class object) from event, one cat use data(TBcid cid) function of TBevt class
         // anEvt->data(TBcid cid) will return TBwaveform class object of corresponding channel ID
@@ -91,8 +94,10 @@ int main(int argc, char** argv) {
         TBwaveform psData = anEvt->data(pscid);
 
         // Exercise 2 : Get data of M1T1 C and S channel using cid
-        TBwaveform M1T1C_data = anEvt->data(); // Your answer here
-        TBwaveform M1T1S_data = ; // Your answer here
+        TBwaveform M1T1C_data = anEvt->data(M1T1C_cid); // Your answer here
+        TBwaveform M1T1S_data = anEvt->data(M1T1S_cid); // Your answer here
+        TBwaveform muon_data = anEvt->data(muon_cid);
+        std::vector<short> muon_waveform = muon_data.waveform();
 
 
         // From TBwaveform data, one can get waveform vector
@@ -103,8 +108,9 @@ int main(int argc, char** argv) {
         std::vector<short> psWaveform = psData.waveform();
 
         // Exercise 3 : Get data of M1T1C and M1T1S waveforms
-        std::vector<short> M1T1C_waveform = ; // Your answer here
-                                            ; // Your answer here
+        std::vector<short> M1T1C_waveform = M1T1C_data.waveform(); // Your answer here
+        std::vector<short> M1T1S_waveform = M1T1S_data.waveform(); // Your answer here
+        printf("%d \n",muon_waveform.size());
 
         // Here we loop over waveform vectors, and fill histograms to draw waveform
         // To draw waveform, one can use weighted histogram of ROOT : histogram->Fill( bin number to fill weight, weight value to fill)
@@ -114,8 +120,9 @@ int main(int argc, char** argv) {
             psWaveformHist->Fill(bin, psWaveform[waveformBin]);
 
             //Exercise 4 : Fill M1T1C and M1T1S waveforms in M1T1C, M1T1S histograms
-            M1T1CWaveformHist->Fill( ); // Your answer here
-                                      ; // Your answer here
+            M1T1CWaveformHist->Fill(bin,M1T1C_waveform[waveformBin]); // Your answer here
+            M1T1SWaveformHist->Fill(bin,M1T1S_waveform[waveformBin]); // Your answer here
+            muonWaveformHist->Fill(bin,muon_waveform[waveformBin]); // Your answer here
         }
         
         // Here we save the waveform plots in ./waveform/PS/ , ./waveform/C/ , ./waveform/S/ directories
@@ -125,6 +132,8 @@ int main(int argc, char** argv) {
         M1T1CWaveformHist->Draw("Hist"); c->SaveAs( ( "./waveform/C/c_" + std::to_string(iEvt) + ".png").c_str() );
         c->cd();
         M1T1SWaveformHist->Draw("Hist"); c->SaveAs( ( "./waveform/S/s_" + std::to_string(iEvt) + ".png").c_str() );
+        c->cd();
+        muonWaveformHist->Draw("Hist"); c->SaveAs( ( "./waveform/mu/muon_" + std::to_string(iEvt) + ".png").c_str() );
 
         printProgress(iEvt + 1, totalEntry);
     }

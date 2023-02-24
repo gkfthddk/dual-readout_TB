@@ -47,11 +47,7 @@ int main(int argc, char** argv) {
     utility.loading("/gatbawi/dream/mapping/mapping_Aug2022TB.root");
 
     // Preparing 2D histograms for DWC 1 & 2 position, correlation plots
-    TH2D* dwc1_pos = new TH2D("dwc1_pos", "dwc1_pos;mm;mm;events", 480, -120., 120., 480, -120., 120.);
-    TH2D* dwc2_pos = new TH2D("dwc2_pos", "dwc2_pos;mm;mm;events", 480, -120., 120., 480, -120., 120.);
-    TH2D* dwc_x_corr = new TH2D("dwc_x_corr", "dwc_x_corr;DWC1_X_mm;DWC2_X_mm;events", 480, -120., 120., 480, -120., 120.);
-    TH2D* dwc_y_corr = new TH2D("dwc_y_corr", "dwc_y_corr;DWC1_Y_mm;DWC2_Y_mm;events", 480, -120., 120., 480, -120., 120.);
-
+    TH1D* muon_pos = new TH1D("muon_pos", "muon", 100, -5000., 50000.);
     /*
     - Structure of DWC
     DWC (Delayed wire chamber) is used to find out the particle's position.
@@ -69,45 +65,24 @@ int main(int argc, char** argv) {
     */
 
     // For example, cid of DWC 1 Right, Left, Up, Down channel can be determined as follows
-    TBcid dwc1_cid_R = TBcid(1,17); // Right
-    TBcid dwc1_cid_L = TBcid(1,19); // Left
-    TBcid dwc1_cid_U = TBcid(1,21); // Up
-    TBcid dwc1_cid_D = TBcid(1,23); // Down
+    //TBcid muon_cid = utility.getcid(TBdetector::detid::preshower);
+    TBcid muon_cid = utility.getcid(TBdetector::detid::muon);
 
+    utility.loadped( ("/gatbawi/dream/ped/mean/Run" + std::to_string(runNum) + "_pedestalHist_mean.root").c_str() );
+    float muonPed = utility.retrievePed(muon_cid);
     // Exercise 1 : Referring to mapping info, get channel IDs of DWC 2
-    TBcid dwc2_cid_R = TBcid(1,25); // R // Your answer here
-    TBcid dwc2_cid_L = TBcid(1,27); // L // Your answer here
-    TBcid dwc2_cid_U = TBcid(1,29); // U // Your answer here
-    TBcid dwc2_cid_D = TBcid(1,31); // D // Your answer here
-
+    float maxADC=0.;
+    float minADC=0.;
     // Start Evt Loop to draw DWC plots
     for (int iEvt = 0; iEvt < totalEntry; iEvt++) {
         evtChain->GetEntry(iEvt);
 
         // Get each DWC1(2) R, L, U, D channels data using evt->data(TBcid cid);
-        TBwaveform dwc1_data_R = anEvt->data(dwc1_cid_R);
-        TBwaveform dwc1_data_L = anEvt->data(dwc1_cid_L);
-        TBwaveform dwc1_data_U = anEvt->data(dwc1_cid_U);
-        TBwaveform dwc1_data_D = anEvt->data(dwc1_cid_D);
-        
+        TBwaveform muon_data = anEvt->data(muon_cid);
         // Exercise 2 : Get DWC2 R, L, U, D channels data
-        TBwaveform dwc2_data_R = anEvt->data(dwc2_cid_R); // Your answer here
-        TBwaveform dwc2_data_L = anEvt->data(dwc2_cid_L); // Your answer here
-        TBwaveform dwc2_data_U = anEvt->data(dwc2_cid_U); // Your answer here
-        TBwaveform dwc2_data_D = anEvt->data(dwc2_cid_D); // Your answer here
-
         // Get each DWC1 R, L, U, D channels waveform using data.waveform();
-        std::vector<short> dwc1_waveform_R = dwc1_data_R.waveform();
-        std::vector<short> dwc1_waveform_L = dwc1_data_L.waveform();
-        std::vector<short> dwc1_waveform_U = dwc1_data_U.waveform();
-        std::vector<short> dwc1_waveform_D = dwc1_data_D.waveform();
+        std::vector<short> muon_waveform = muon_data.waveform();
 
-        // Exercise 3 : Get DWC2 R, L, U, D channels waveform
-        std::vector<short> dwc2_waveform_R = dwc2_data_R.waveform(); // Your answer here
-        std::vector<short> dwc2_waveform_L = dwc2_data_L.waveform(); // Your answer here
-        std::vector<short> dwc2_waveform_U = dwc2_data_U.waveform(); // Your answer here
-        std::vector<short> dwc2_waveform_D = dwc2_data_D.waveform(); // Your answer here
-        
         /*
         To get DWC position from its calibration value, one needs to know peak timing of the waveform
         Here, peak timing is the time of waveform reaching at its peak position (minimum value)
@@ -128,16 +103,13 @@ int main(int argc, char** argv) {
         */
 
         // Get DWC 1 R, L, U, D peak timing from their waveforms
-        float dwc1_peak_R = getPeakTime(dwc1_waveform_R);
-        float dwc1_peak_L = getPeakTime(dwc1_waveform_L);
-        float dwc1_peak_U = getPeakTime(dwc1_waveform_U);
-        float dwc1_peak_D = getPeakTime(dwc1_waveform_D);
+        //float muon_peak = getPeakTime(muon_waveform);
+        float muonIntADC = 0.f;
+        for (int bin = 0; bin < 1000; bin++) {
+            int waveformBin = bin + 1;
+            muonIntADC += muonPed - muon_waveform[waveformBin];
+        }
 
-        // Exercise 4 : Get DWC2 R, L, U, D peak timing from their waveforms
-        float dwc2_peak_R = getPeakTime(dwc2_waveform_R); // Your answer here
-        float dwc2_peak_L = getPeakTime(dwc2_waveform_L); // Your answer here
-        float dwc2_peak_U = getPeakTime(dwc2_waveform_U); // Your answer here
-        float dwc2_peak_D = getPeakTime(dwc2_waveform_D); // Your answer here
 
         /*
         To get DWC position from timing value, one need to do as follows (refer to DWC info pdf page 3)
@@ -158,44 +130,25 @@ int main(int argc, char** argv) {
         float dwc2_Vertical_Offset = -0.278179655;
         */
 
-        // For example, calculating DWC1 position from timing value can be done as follows
-        float dwc1_horizontal_Slope = 0.1740806676;
-        float dwc1_horizontal_Offset = 0.1680572999;
-        float dwc1_Vertical_Slope = -0.17424779576;
-        float dwc1_Vertical_Offset = -0.053701300;
-
-        float dwc1_x_position = ( (float) (dwc1_peak_R - dwc1_peak_L ) * dwc1_horizontal_Slope) + dwc1_horizontal_Offset;
-        float dwc1_y_position = ( (float) (dwc1_peak_U - dwc1_peak_D ) * dwc1_Vertical_Slope)   + dwc1_Vertical_Offset;
-
-        // Exercise 5 : Get DWC2 position from its peak timing values
-        float dwc2_horizontal_Slope = 0.17257273;
-        float dwc2_horizontal_Offset = 0.579927452;
-        float dwc2_Vertical_Slope = -0.1741203164;
-        float dwc2_Vertical_Offset = -0.278179655;
-
-        float dwc2_x_position = ( (float) (dwc2_peak_R - dwc2_peak_L ) * dwc2_horizontal_Slope) + dwc2_horizontal_Offset; // Your answer here
-        float dwc2_y_position = ( (float) (dwc2_peak_U - dwc2_peak_D ) * dwc2_Vertical_Slope)   + dwc2_Vertical_Offset; // Your answer here
-
 
         // Filling 2D histogram to plot DWC 1 and 2 positions
-        dwc1_pos->Fill(dwc1_x_position, dwc1_y_position);
-        dwc2_pos->Fill(dwc2_x_position, dwc2_y_position); 
-        // Filling DWC 1 and 2 X positions to plot DWC 1 & 2 x-position correlation plot
-        dwc_x_corr->Fill(dwc1_x_position, dwc2_x_position);
-        dwc_y_corr->Fill(dwc1_y_position, dwc2_y_position);
+        muon_pos->Fill(muonIntADC);
+        if(maxADC<muonIntADC){
+           maxADC=muonIntADC;
+        }
+        if(minADC>muonIntADC){
+           minADC=muonIntADC;
+        }
 
         printProgress(iEvt + 1, totalEntry);
     }
-
+    printf("max %g min %g \n ",maxADC,minADC);
     // Saving the DWC position & correlation plots in root file in ./dwc directory.
-    std::string outFile = "./box/dwc_Run_" + std::to_string(runNum) + ".root";
+    std::string outFile = "./muon/muon_Run_" + std::to_string(runNum) + ".root";
     TFile* outputRoot = new TFile(outFile.c_str(), "RECREATE");
     outputRoot->cd();
 
-    dwc1_pos->Write();
-    dwc2_pos->Write();
-    dwc_x_corr->Write();
-    dwc_y_corr->Write();
+    muon_pos->Write();
 
     outputRoot->Close();
 }

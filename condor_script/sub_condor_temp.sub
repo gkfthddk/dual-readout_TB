@@ -1,0 +1,19 @@
+universe = vanilla
+executable = /u/user/dream13/dual-readout_TB/condor_script/da_condor.sh
+
+arguments = RUN_NUMBER
+output = ./condor/out/o_RUN_NUMBER.out
+error  = ./condor/err/e_RUN_NUMBER.err
+log    = ./condor/log/l_RUN_NUMBER.log
+request_memory = 1 GB 
+should_transfer_files = YES
+when_to_transfer_output = ON_EXIT
+transfer_input_files = /u/user/dream13/dual-readout_TB/analysis/TBdrawWave.exe, \
+                       /u/user/dream13/dual-readout_TB/analysis/TBdwc.exe, \
+                       /u/user/dream13/dual-readout_TB/analysis/TBauxPID.exe, \
+                       /u/user/dream13/dual-readout_TB/install/lib64, \
+                       /u/user/dream13/dual-readout_TB/condor_script/da_condor.sh
+
+transfer_output_files = box
+JobBatchName = dwc_aux_RUN_NUMBER
+queue 1

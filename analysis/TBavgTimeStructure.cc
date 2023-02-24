@@ -84,8 +84,8 @@ int main(int argc, char** argv) {
 
     // Exercise 2 : Get pre-shower and module 1 tower 1 C, S channel cid using utility.getcid()
     TBcid pscid = utility.getcid(TBdetector::detid::preshower);
-    TBcid M1T1C_cid = utility.getcid(); // Your answer here
-    TBcid M1T1S_cid = utility.getcid(); // Your answer here
+    TBcid M1T1C_cid = utility.getcid(TBdetector::detid::PMT,1,1,true); // Your answer here
+    TBcid M1T1S_cid = utility.getcid(TBdetector::detid::PMT,1,1,false); // Your answer here
 
     /*
     When drawing average time structure, we need to remove particles which are likely to miss our module
@@ -123,10 +123,11 @@ int main(int argc, char** argv) {
         std::vector<short> psWaveform = psData.waveform();
 
         // Exercise 3 : Get waveform of both Module 1 tower 1 S and C channels
-        TBwaveform M1T1C_data = ; // Your answer here
-        std::vector<short> M1T1C_waveform = ; // Your answer here
-                                ; // Your answer here
-                                            ; // Your answer here
+        TBwaveform M1T1C_data = anEvt->data(M1T1C_cid); // Your answer here
+        TBwaveform M1T1S_data = anEvt->data(M1T1S_cid); // Your answer here
+        std::vector<short> M1T1C_waveform = M1T1C_data.waveform(); // Your answer here
+        std::vector<short> M1T1S_waveform = M1T1S_data.waveform(); // Your answer here
+
 
         // This part is for getting DWC data -> waveform -> peak timing and applying DWC correlation cut
         std::vector<TBwaveform> dwc1_data;
@@ -169,8 +170,8 @@ int main(int argc, char** argv) {
             // Pre-shower
             psHist        ->Fill(bin, psWaveform[waveformBin]);
             // Exercise 4 : Fill M1T1 C, S histogram with corresponding waveforms
-            M1T1CHist     ->Fill(, ); // Your answer here
-            M1T1SHist     ->Fill(, ); // Your answer here
+            M1T1CHist->Fill(bin,M1T1C_waveform[waveformBin]); // Your answer here
+            M1T1SHist->Fill(bin,M1T1S_waveform[waveformBin]); // Your answer here
         }
     }
 
